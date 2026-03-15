@@ -6,6 +6,8 @@ import { ItemRow, Item } from "./components/ItemCard";
 import { CartDrawer, CartItem } from "./components/CartDrawer";
 import itemsData from "../imports/table.json";
 
+type SortConfig = { key: keyof Item; direction: 'asc' | 'desc' };
+
 export default function App() {
   const [searchName, setSearchName] = useState("");
   const [selectedTiers, setSelectedTiers] = useState<string[]>([]);
@@ -15,108 +17,112 @@ export default function App() {
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
 
-  const [sortConfig, setSortConfig] = useState<{ key: keyof Item; direction: 'asc' | 'desc' } | null>(null);
+  // Multi-column sort: array of SortConfig, first element has highest priority
+  const [sortConfigs, setSortConfigs] = useState<SortConfig[]>([]);
 
   const items = itemsData as Item[];
 
-  // Extract unique types from items
   const availableTypes = useMemo(() => {
     const typesSet = new Set<string>();
     items.forEach((item) => {
-      const types = item.type.split(',').map(t => t.trim());
-      types.forEach(type => typesSet.add(type));
+      item.type.split(',').map(t => t.trim()).forEach(type => typesSet.add(type));
     });
     return Array.from(typesSet).sort();
   }, [items]);
 
-  // Filter items based on search and filters
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       if (searchName && !item.name.toLowerCase().includes(searchName.toLowerCase())) return false;
       if (selectedTiers.length > 0 && !selectedTiers.includes(item.tier)) return false;
       if (attunementFilter === "Yes" && item.attunement !== "Yes") return false;
       if (attunementFilter === "No" && item.attunement !== "No") return false;
-
       if (selectedTypes.length > 0) {
         const itemTypes = item.type.split(',').map(t => t.trim());
-        const hasMatchingType = selectedTypes.some(selectedType =>
-          itemTypes.includes(selectedType)
-        );
-        if (!hasMatchingType) return false;
+        if (!selectedTypes.some(t => itemTypes.includes(t))) return false;
       }
-
       if (sessionFilter === "Yes" && item.session_required !== "Yes") return false;
       if (sessionFilter === "No" && item.session_required !== "No") return false;
-
       return true;
     });
   }, [items, searchName, selectedTiers, attunementFilter, selectedTypes, sessionFilter]);
 
-  // Apply sorting
   const sortedItems = useMemo(() => {
     let sortableItems = [...filteredItems];
-    if (sortConfig !== null) {
+    if (sortConfigs.length > 0) {
       sortableItems.sort((a, b) => {
-        let aValue = a[sortConfig.key];
-        let bValue = b[sortConfig.key];
+        for (const { key, direction } of sortConfigs) {
+          let aValue = a[key];
+          let bValue = b[key];
 
-        // Numeric sort for cost
-        if (sortConfig.key === 'cost') {
-          const aNum = parseFloat(aValue.toString().replace(/[^0-9.-]+/g, "")) || 0;
-          const bNum = parseFloat(bValue.toString().replace(/[^0-9.-]+/g, "")) || 0;
-          return sortConfig.direction === 'asc' ? aNum - bNum : bNum - aNum;
+          // Numeric sort for Cost
+          if (key === 'cost') {
+            const aNum = parseFloat(aValue.toString().replace(/[^0-9.-]+/g, "")) || 0;
+            const bNum = parseFloat(bValue.toString().replace(/[^0-9.-]+/g, "")) || 0;
+            if (aNum !== bNum) return direction === 'asc' ? aNum - bNum : bNum - aNum;
+          } else {
+            if (aValue !== bValue) {
+              return direction === 'asc'
+                ? aValue.toString().localeCompare(bValue.toString())
+                : bValue.toString().localeCompare(aValue.toString());
+            }
+          }
         }
-
-        // String sort for everything else
-        if (typeof aValue === 'string' && typeof bValue === 'string') {
-          return sortConfig.direction === 'asc'
-            ? aValue.localeCompare(bValue)
-            : bValue.localeCompare(aValue);
-        }
-
         return 0;
       });
     }
     return sortableItems;
-  }, [filteredItems, sortConfig]);
+  }, [filteredItems, sortConfigs]);
 
-  const handleSort = (key: keyof Item) => {
-    setSortConfig((prev) => {
-      if (prev?.key === key) {
-        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+  const handleSort = (key: keyof Item, shiftKey: boolean = false) => {
+    setSortConfigs((prev) => {
+      const existingIndex = prev.findIndex(cfg => cfg.key === key);
+
+      if (!shiftKey) {
+        // Replace sort if shift is not held
+        if (existingIndex !== -1) {
+          // Toggle direction
+          const newDir = prev[existingIndex].direction === 'asc' ? 'desc' : 'asc';
+          return [{ key, direction: newDir }];
+        }
+        return [{ key, direction: 'asc' }];
+      } else {
+        // Shift held: multi-column
+        const newConfigs = [...prev];
+        if (existingIndex !== -1) {
+          // Toggle direction for existing
+          newConfigs[existingIndex].direction = newConfigs[existingIndex].direction === 'asc' ? 'desc' : 'asc';
+        } else {
+          newConfigs.push({ key, direction: 'asc' });
+        }
+        return newConfigs;
       }
-      return { key, direction: 'asc' };
     });
   };
 
   const handleAddToCart = (item: Item, quantity: number) => {
-    setCartItems((prevCart) => {
-      const existingItem = prevCart.find((cartItem) => cartItem.item.name === item.name);
-      if (existingItem) {
-        return prevCart.map((cartItem) =>
-          cartItem.item.name === item.name
-            ? { ...cartItem, quantity: cartItem.quantity + quantity }
-            : cartItem
-        );
-      }
-      return [...prevCart, { item, quantity }];
+    setCartItems(prev => {
+      const existing = prev.find(ci => ci.item.name === item.name);
+      if (existing) return prev.map(ci => ci.item.name === item.name ? { ...ci, quantity: ci.quantity + quantity } : ci);
+      return [...prev, { item, quantity }];
     });
   };
 
   const handleUpdateQuantity = (itemName: string, newQuantity: number) => {
     if (newQuantity < 1) return;
-    setCartItems((prevCart) =>
-      prevCart.map((cartItem) =>
-        cartItem.item.name === itemName ? { ...cartItem, quantity: newQuantity } : cartItem
-      )
-    );
+    setCartItems(prev => prev.map(ci => ci.item.name === itemName ? { ...ci, quantity: newQuantity } : ci));
   };
 
   const handleRemoveItem = (itemName: string) => {
-    setCartItems((prevCart) => prevCart.filter((cartItem) => cartItem.item.name !== itemName));
+    setCartItems(prev => prev.filter(ci => ci.item.name !== itemName));
   };
 
-  const totalCartItems = cartItems.reduce((sum, cartItem) => sum + cartItem.quantity, 0);
+  const totalCartItems = cartItems.reduce((sum, ci) => sum + ci.quantity, 0);
+
+  const getSortIndicator = (key: keyof Item) => {
+    const index = sortConfigs.findIndex(cfg => cfg.key === key);
+    if (index === -1) return '';
+    return sortConfigs[index].direction === 'asc' ? `↑${sortConfigs.length > 1 ? index + 1 : ''}` : `↓${sortConfigs.length > 1 ? index + 1 : ''}`;
+  };
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-6">
@@ -152,24 +158,15 @@ export default function App() {
                 <table className="w-full">
                   <thead>
                     <tr className="bg-gray-700 border-b border-gray-600">
-                      <th className="px-4 py-3 text-left font-semibold cursor-pointer" onClick={() => handleSort('name')}>
-                        Name {sortConfig?.key === 'name' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                      </th>
-                      <th className="px-4 py-3 text-center font-semibold cursor-pointer" onClick={() => handleSort('tier')}>
-                        Tier {sortConfig?.key === 'tier' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                      </th>
-                      <th className="px-4 py-3 text-center font-semibold cursor-pointer" onClick={() => handleSort('attunement')}>
-                        Attunement {sortConfig?.key === 'attunement' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold cursor-pointer" onClick={() => handleSort('type')}>
-                        Type {sortConfig?.key === 'type' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                      </th>
-                      <th className="px-4 py-3 text-center font-semibold cursor-pointer" onClick={() => handleSort('session_required')}>
-                        Session {sortConfig?.key === 'session_required' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold cursor-pointer" onClick={() => handleSort('cost')}>
-                        Cost {sortConfig?.key === 'cost' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                      </th>
+                      {(['name','tier','attunement','type','session_required','cost'] as (keyof Item)[]).map((key) => (
+                        <th
+                          key={key}
+                          className="px-4 py-3 font-semibold cursor-pointer text-left"
+                          onClick={(e) => handleSort(key, e.shiftKey)}
+                        >
+                          {key.charAt(0).toUpperCase() + key.slice(1).replace('_',' ')} {getSortIndicator(key)}
+                        </th>
+                      ))}
                       <th className="px-4 py-3 text-right font-semibold">Actions</th>
                     </tr>
                   </thead>
@@ -181,8 +178,8 @@ export default function App() {
                         </td>
                       </tr>
                     ) : (
-                      sortedItems.map((item, index) => (
-                        <ItemRow key={`${item.name}-${index}`} item={item} onAddToCart={handleAddToCart} />
+                      sortedItems.map((item, idx) => (
+                        <ItemRow key={`${item.name}-${idx}`} item={item} onAddToCart={handleAddToCart} />
                       ))
                     )}
                   </tbody>
