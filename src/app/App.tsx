@@ -60,11 +60,20 @@ export default function App() {
         let aValue = a[sortConfig.key];
         let bValue = b[sortConfig.key];
 
+        // Numeric sort for cost
+        if (sortConfig.key === 'cost') {
+          const aNum = parseFloat(aValue.toString().replace(/[^0-9.-]+/g, "")) || 0;
+          const bNum = parseFloat(bValue.toString().replace(/[^0-9.-]+/g, "")) || 0;
+          return sortConfig.direction === 'asc' ? aNum - bNum : bNum - aNum;
+        }
+
+        // String sort for everything else
         if (typeof aValue === 'string' && typeof bValue === 'string') {
           return sortConfig.direction === 'asc'
             ? aValue.localeCompare(bValue)
             : bValue.localeCompare(aValue);
         }
+
         return 0;
       });
     }
@@ -115,7 +124,6 @@ export default function App() {
         <h1 className="text-3xl font-bold mb-8">Magic Items Shop</h1>
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          {/* Filters sidebar */}
           <aside className="lg:col-span-1">
             <ItemFilters
               searchName={searchName}
@@ -132,7 +140,6 @@ export default function App() {
             />
           </aside>
 
-          {/* Items table */}
           <main className="lg:col-span-4">
             <div className="mb-4">
               <p className="text-gray-400">
@@ -186,7 +193,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Floating cart button */}
       <Button
         className="fixed bottom-6 right-6 rounded-full h-14 w-14 shadow-lg"
         onClick={() => setIsCartOpen(true)}
@@ -199,7 +205,6 @@ export default function App() {
         )}
       </Button>
 
-      {/* Cart drawer */}
       <CartDrawer
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
